@@ -2,6 +2,8 @@
 
 在Emacs里看小说！
 
+[Switch to English](README.en.md)
+
 这是 [biquge.nvim](https://github.com/v1nh1shungry/biquge.nvim) 的Emacs移植版本，允许你在Emacs中阅读小说。
 
 本插件在光标所在位置以overlay的形式插入小说内容，将高亮设置为注释后，就可以完美cosplay注释了:) overlay也不会污染buffer的内容。

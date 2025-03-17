@@ -68,6 +68,12 @@ Possible values are:
           (const :tag "Vertico" vertico))
   :group 'biquge)
 
+(defcustom biquge-debug-mode nil
+  "When non-nil, enable debug messages.
+This is useful for troubleshooting issues with parsing or network operations."
+  :type 'boolean
+  :group 'biquge)
+
 ;;; Variables
 
 (defvar biquge--domain "http://www.xbiquzw.com"
@@ -108,6 +114,21 @@ Possible values are:
 (defun biquge--notify (msg &optional level)
   "Display a notification with MSG at LEVEL."
   (message "[biquge] %s" msg))
+
+(defun biquge-debug (format-string &rest args)
+  "Output debug message if debug mode is enabled.
+FORMAT-STRING and ARGS are passed to `message'."
+  (when biquge-debug-mode
+    (apply #'message (concat "[biquge-debug] " format-string) args)))
+
+;;;###autoload
+(defun biquge-toggle-debug ()
+  "Toggle debug mode on/off."
+  (interactive)
+  (setq biquge-debug-mode (not biquge-debug-mode))
+  (biquge--notify (if biquge-debug-mode
+                      "Debug mode enabled"
+                    "Debug mode disabled")))
 
 (defun biquge--current-chap-index ()
   "Get the index of the current chapter in the table of contents."
