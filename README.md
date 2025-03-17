@@ -17,6 +17,7 @@
 
 * Emacs >= 27.1
 * curl
+* dom-select.el (用于CSS选择器解析HTML)
 
 ## 安装
 
@@ -59,6 +60,24 @@
       (expand-file-name "biquge_bookshelf.json" user-emacs-directory))
 (setq biquge-picker 'builtin)          ; UI选择器
                                        ; 可选值：'builtin, 'ivy, 'helm, 'vertico
+```
+
+## 安装 dom-select.el
+
+`dom-select.el` 是必需的依赖，提供CSS选择器语法来解析HTML。
+
+安装方法：
+
+```elisp
+;; 使用quelpa安装
+(quelpa '(dom-select :fetcher github :repo "twlz0ne/dom-select.el"))
+
+;; 或者使用straight.el
+(straight-use-package '(dom-select :type git :host github :repo "twlz0ne/dom-select.el"))
+
+;; 或者使用use-package和straight.el
+(use-package dom-select
+  :straight (dom-select :type git :host github :repo "twlz0ne/dom-select.el"))
 ```
 
 ## 推荐键绑定

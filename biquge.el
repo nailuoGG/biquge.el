@@ -141,15 +141,22 @@ Possible values are:
 (defun biquge--load-bookshelf ()
   "Load the bookshelf from file."
   (when (file-exists-p biquge-bookshelf-file)
-    (with-temp-buffer
-      (insert-file-contents biquge-bookshelf-file)
-      (setq biquge--bookshelf (biquge-web--json-parse-bookshelf (buffer-string))))))
+    (condition-case err
+        (with-temp-buffer
+          (insert-file-contents biquge-bookshelf-file)
+          (setq biquge--bookshelf (biquge-web--json-parse-bookshelf (buffer-string))))
+      (error
+       (message "Error loading bookshelf: %S" err)
+       (setq biquge--bookshelf nil)))))
 
 (defun biquge--save-bookshelf ()
   "Save the bookshelf to file."
   (biquge--save)
-  (with-temp-file biquge-bookshelf-file
-    (insert (biquge-web--json-encode-bookshelf biquge--bookshelf))))
+  (condition-case err
+      (with-temp-file biquge-bookshelf-file
+        (insert (biquge-web--json-encode-bookshelf biquge--bookshelf)))
+    (error
+     (message "Error saving bookshelf: %S" err))))
 
 (defun biquge--pieces (line)
   "Split LINE into pieces of width `biquge-width'."
@@ -297,11 +304,17 @@ Possible values are:
   (interactive)
   (if (null biquge--current-book)
       (biquge--notify "没有正在阅读的小说，请先搜索想要阅读的小说" 'warning)
-    (biquge--fetch-toc)
-    (biquge-ui-pick-chapter biquge--current-book biquge--current-toc
-                            (lambda (chap)
-                              (setq biquge--current-chap chap)
-                              (biquge--cook-content)))))
+    (biquge-async-run
+     (lambda ()
+       ;; 直接同步获取目录
+       (setq biquge--current-toc
+             (biquge-web-get-toc
+              (concat biquge--domain (biquge-book-link biquge--current-book))))
+       ;; 目录获取完成后再显示
+       (biquge-ui-pick-chapter biquge--current-book biquge--current-toc
+                              (lambda (chap)
+                                (setq biquge--current-chap chap)
+                                (biquge--cook-content)))))))
 
 ;;;###autoload
 (defun biquge-search ()
@@ -359,9 +372,13 @@ Possible values are:
   (biquge-ui-pick-bookshelf biquge--bookshelf
                             (lambda (record)
                               (setq biquge--current-book (biquge-record-info record))
-                              (biquge--fetch-toc)
                               (biquge-async-run
                                (lambda ()
+                                 ;; 直接同步获取目录
+                                 (setq biquge--current-toc
+                                       (biquge-web-get-toc
+                                        (concat biquge--domain (biquge-book-link biquge--current-book))))
+                                 ;; 目录获取完成后再处理章节
                                  (let ((index (biquge-record-last-read record)))
                                    (when (and (>= index 0)
                                               (< index (length biquge--current-toc)))

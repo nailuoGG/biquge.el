@@ -5,7 +5,7 @@
 ;; Author: nailuoGG
 ;; URL: https://github.com/nailuoGG/biquge.el
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "27.1"))
+;; Package-Requires: ((emacs "27.1") (dom-select "0.1"))
 ;; Keywords: convenience
 
 ;; This file is not part of GNU Emacs.
@@ -20,6 +20,7 @@
 (require 'dom)
 (require 'json)
 (require 'url-util)
+(require 'dom-select)
 
 (require 'biquge-types)
 (require 'biquge-async)
@@ -35,47 +36,85 @@
 
 (defun biquge-web--parse-html (html)
   "Parse HTML string into a DOM tree."
+  (message "[biquge-debug] 开始解析HTML，长度: %d" (length html))
   (with-temp-buffer
     (insert (biquge-web--normalize-html html))
-    (libxml-parse-html-region (point-min) (point-max))))
+    (message "[biquge-debug] 规范化后HTML长度: %d" (buffer-size))
+    (let ((dom (libxml-parse-html-region (point-min) (point-max))))
+      (message "[biquge-debug] DOM解析完成，结构: %s..."
+               (substring (format "%S" dom) 0 (min 100 (length (format "%S" dom)))))
+      dom)))
 
 ;; Content extraction functions
 
 (defun biquge-web--extract-content (dom)
-  "Extract content from DOM."
-  (let ((content-div (dom-by-id dom "content")))
-    (if content-div
-        (split-string (dom-text content-div) "\n")
-      nil)))
+  "Extract content from DOM using CSS selectors."
+  (message "[biquge-debug] 开始提取章节内容 DOM类型: %s" (type-of dom))
+  (let ((content nil))
+    (condition-case err
+        (let ((content-div (car (dom-select dom "#content"))))
+          (message "[biquge-debug] content-div查找结果: %s" (if content-div "找到" "未找到"))
+          (when content-div
+            (message "[biquge-debug] content-div结构: %s..."
+                     (substring (format "%S" content-div) 0 (min 100 (length (format "%S" content-div)))))
+            (let ((text (dom-text content-div)))
+              (message "[biquge-debug] 提取到文本长度: %d" (length text))
+              (setq content (split-string text "\n"))
+              (message "[biquge-debug] 分割后行数: %d" (length content)))))
+      (error
+       (message "[biquge-debug] dom-select 错误: %S" err)
+       (setq content nil)))
+
+    ;; 如果没有找到内容，尝试其他可能的容器
+    (unless content
+      (message "[biquge-debug] 未找到content-div，尝试查找其他可能的内容容器"))
+
+    content))
 
 (defun biquge-web--extract-toc (dom)
-  "Extract table of contents from DOM."
-  (let ((chapters nil)
-        (list-div (dom-by-id dom "list")))
-    (when list-div
-      (dolist (a (dom-by-tag list-div 'a))
-        (let ((link (dom-attr a 'href))
-              (title (dom-text a)))
-          (when (and link title)
-            (push (biquge-chapter-create :link link :title title) chapters)))))
+  "Extract table of contents from DOM using CSS selectors."
+  (message "[biquge-debug] 开始提取目录 DOM类型: %s" (type-of dom))
+  (let ((chapters nil))
+    (condition-case err
+        (let ((list-items (dom-select dom "#list a")))
+          (message "[biquge-debug] 找到链接数量: %d" (length list-items))
+          (dolist (a list-items)
+            (let ((link (dom-attr a 'href))
+                  (title (dom-text a)))
+              (message "[biquge-debug] 处理链接: %s, 标题: %s" link title)
+              (when (and link title)
+                (push (biquge-chapter-create :link link :title title) chapters)))))
+      (error
+       (message "[biquge-debug] dom-select 错误: %S" err)
+       (setq chapters nil)))
+
+    (message "[biquge-debug] 提取完成，章节数: %d" (length chapters))
     (nreverse chapters)))
 
 (defun biquge-web--extract-books (dom)
-  "Extract books from search results DOM."
-  (let ((books nil)
-        (grid-table (dom-elements dom 'class "grid")))
-    (when grid-table
-      (dolist (tr (dom-by-tag grid-table 'tr))
-        (let* ((tds (dom-by-tag tr 'td))
-               (title-td (car tds))
-               (author-td (cadr tds)))
-          (when (and title-td author-td)
-            (let* ((a (dom-by-tag title-td 'a))
-                   (link (dom-attr (car a) 'href))
-                   (title (dom-text (car a)))
-                   (author (dom-text author-td)))
-              (when (and link title author)
-                (push (biquge-book-create :link link :title title :author author) books)))))))
+  "Extract books from DOM using CSS selectors."
+  (message "[biquge-debug] 开始提取书籍 DOM类型: %s" (type-of dom))
+  (let ((books nil))
+    (condition-case err
+        (let ((rows (dom-select dom ".grid tr")))
+          (message "[biquge-debug] 找到表格行数: %d" (length rows))
+          (dolist (tr rows)
+            ;; 跳过表头行
+            (when (dom-select tr "td")
+              (let* ((title-a (car (dom-select tr "td:first-child a")))
+                     (author-td (car (dom-select tr "td:nth-child(2)")))
+                     (link (and title-a (dom-attr title-a 'href)))
+                     (title (and title-a (dom-text title-a)))
+                     (author (and author-td (dom-text author-td))))
+                (message "[biquge-debug] 提取书籍: 链接=%s, 标题=%s, 作者=%s"
+                         (or link "nil") (or title "nil") (or author "nil"))
+                (when (and link title author)
+                  (push (biquge-book-create :link link :title title :author author) books))))))
+      (error
+       (message "[biquge-debug] dom-select 错误: %S" err)
+       (setq books nil)))
+
+    (message "[biquge-debug] 提取完成，书籍数: %d" (length books))
     (nreverse books)))
 
 ;; JSON handling for bookshelf
@@ -97,58 +136,98 @@
         (bookshelf nil))
     (dolist (item json-array)
       (let* ((info (alist-get 'info item))
-             (book (biquge-book-create
-                    :author (alist-get 'author info)
-                    :link (alist-get 'link info)
-                    :title (alist-get 'title info)))
-             (last-read (alist-get 'last_read item)))
-        (push (biquge-record-create :info book :last-read last-read) bookshelf)))
+             (author (or (alist-get 'author info) ""))  ;; 确保至少有空字符串
+             (link (or (alist-get 'link info) ""))      ;; 确保至少有空字符串
+             (title (or (alist-get 'title info) ""))    ;; 确保至少有空字符串
+             (book (condition-case err
+                       (biquge-book-create :author author :link link :title title)
+                     (error
+                      (message "Error creating book: %S" err)
+                      nil)))
+             (last-read (or (alist-get 'last_read item) 0)))  ;; 确保有默认值
+        (when book  ;; 只有当成功创建 book 时才添加记录
+          (push (biquge-record-create :info book :last-read last-read) bookshelf))))
     (nreverse bookshelf)))
 
 ;; API functions
 
 (defun biquge-web-search (query)
   "Search for books with QUERY."
+  (message "[biquge-debug] 开始搜索: %s" query)
   (let ((result nil)
         (url (format "http://www.xbiquzw.com/modules/article/search.php?searchkey=%s"
                      (url-hexify-string query))))
+    (message "[biquge-debug] 搜索URL: %s" url)
     (biquge-async-shell-command
      (format "curl --compressed '%s'" url)
      (lambda (html)
-       (setq result (biquge-web--extract-books (biquge-web--parse-html html)))))
+       (message "[biquge-debug] 获取搜索结果HTML长度: %d" (length html))
+       ;; 保存HTML以便手动检查
+       (with-temp-file "/tmp/biquge-search-debug.html"
+         (insert html))
+       (message "[biquge-debug] 搜索HTML已保存到/tmp/biquge-search-debug.html")
+       (let ((dom (biquge-web--parse-html html)))
+         (message "[biquge-debug] 搜索DOM解析完成")
+         (setq result (biquge-web--extract-books dom)))))
 
     ;; Wait for the result (in a real async implementation, we would use callbacks)
+    (message "[biquge-debug] 等待搜索结果...")
     (while (null result)
       (sit-for 0.1))
 
+    (message "[biquge-debug] 搜索完成，找到书籍数: %d" (length result))
     result))
 
 (defun biquge-web-get-toc (url)
   "Get table of contents from URL."
+  (message "[biquge-debug] 开始获取目录: %s" url)
   (let ((result nil))
     (biquge-async-shell-command
      (format "curl --compressed '%s'" url)
      (lambda (html)
-       (setq result (biquge-web--extract-toc (biquge-web--parse-html html)))))
+       (message "[biquge-debug] 获取HTML响应长度: %d" (length html))
+       ;; 保存HTML以便手动检查
+       (with-temp-file "/tmp/biquge-debug.html"
+         (insert html))
+       (message "[biquge-debug] HTML已保存到/tmp/biquge-debug.html")
 
-    ;; Wait for the result
+       ;; 使用DOM解析和CSS选择器提取
+       (let ((dom (biquge-web--parse-html html)))
+         (message "[biquge-debug] DOM解析完成")
+         (setq result (biquge-web--extract-toc dom)))))
+
+    ;; 等待结果
+    (message "[biquge-debug] 等待目录提取结果...")
     (while (null result)
       (sit-for 0.1))
 
+    (message "[biquge-debug] 目录获取完成，章节数: %d" (length result))
     result))
 
 (defun biquge-web-get-chapter-content (url)
   "Get chapter content from URL."
+  (message "[biquge-debug] 开始获取章节内容: %s" url)
   (let ((result nil))
     (biquge-async-shell-command
      (format "curl --compressed '%s'" url)
      (lambda (html)
-       (setq result (biquge-web--extract-content (biquge-web--parse-html html)))))
+       (message "[biquge-debug] 获取章节HTML响应长度: %d" (length html))
+       ;; 保存HTML以便手动检查
+       (with-temp-file "/tmp/biquge-chapter-debug.html"
+         (insert html))
+       (message "[biquge-debug] 章节HTML已保存到/tmp/biquge-chapter-debug.html")
+       (let ((dom (biquge-web--parse-html html)))
+         (message "[biquge-debug] 章节DOM解析完成")
+         (let ((content (biquge-web--extract-content dom)))
+           (message "[biquge-debug] 章节内容提取完成，行数: %d" (length content))
+           (setq result content)))))
 
     ;; Wait for the result
+    (message "[biquge-debug] 等待章节内容提取结果...")
     (while (null result)
       (sit-for 0.1))
 
+    (message "[biquge-debug] 章节内容获取完成")
     result))
 
 (provide 'biquge-web)
